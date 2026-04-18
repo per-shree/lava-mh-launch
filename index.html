@@ -6,10 +6,13 @@
   <title>Inauguration Display</title>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
-    html, body { width: 100%; height: 100%; background: #000; overflow: hidden; cursor: none; }
-    #wrapper { width: 100vw; height: 100vh; display: grid; place-items: center; background: #000; }
+    html, body { 
+      width: 100%; height: 100%; background: #000; overflow: hidden; 
+      font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+    }
+    #wrapper { width: 100vw; height: 100vh; display: flex; align-items: center; justify-content: center; background: #000; }
     video, img { width: 100vw; height: 100vh; object-fit: cover; position: absolute; top: 0; left: 0; }
-    .hidden { display: none; }
+    .hidden { display: none !important; }
 
     /* Website iframe — shown after video */
     #site-wrap {
@@ -41,21 +44,33 @@
     }
 
     /* Status bar */
-    #bar { position: fixed; bottom: 0; left: 0; right: 0; background: rgba(0,0,0,0.75); color: #9ab; font: 13px/1.6 sans-serif; text-align: center; padding: 4px 12px; z-index: 10; transition: opacity .6s; }
-    #bar.ok { color: #6fd6a4; }
+    #bar { position: fixed; bottom: 0; left: 0; right: 0; background: rgba(0,0,0,0.8); color: #9ab; font: 600 12px/1.6 sans-serif; text-transform: uppercase; letter-spacing: 1px; text-align: center; padding: 10px 12px; z-index: 10; transition: opacity .6s; border-top: 1px solid rgba(255,255,255,0.1); }
+    #bar.ok { color: #6fd6a4; text-shadow: 0 0 10px rgba(111,214,164,0.3); }
     #bar.gone { opacity: 0; pointer-events: none; }
 
-    /* Click-to-arm overlay */
-    #overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.85); display: grid; place-items: center; z-index: 50; cursor: pointer; }
-    #overlay span { color: #fff; font: 600 32px sans-serif; text-align: center; padding: 16px; pointer-events: none; }
-    #overlay.hidden { display: none; }
+    /* Minimal Overlay */
+    #overlay { 
+      position: fixed; inset: 0; 
+      background: #000;
+      display: flex; align-items: center; justify-content: center; 
+      z-index: 100; cursor: pointer; 
+    }
+    #overlay .text { 
+      color: #fff; 
+      font-size: 24px; 
+      font-weight: 400; 
+      text-transform: uppercase;
+      letter-spacing: 2px;
+      opacity: 0.8;
+    }
+    #overlay.hidden { display: none !important; }
 
     /* Celebration canvas */
     #celebrate {
       display: none;
       position: fixed;
       inset: 0;
-      z-index: 40;
+      z-index: 80;
       pointer-events: none;
       transition: opacity 1.5s ease;
     }
@@ -79,8 +94,10 @@
 
   <canvas id="celebrate"></canvas>
 
-  <div id="overlay"><span>Click anywhere to start</span></div>
-  <div id="bar">Connecting...</div>
+  <div id="overlay">
+    <div class="text">Click to Setup Display</div>
+  </div>
+  <div id="bar">System Booting...</div>
 
   <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
   <script>
@@ -90,7 +107,7 @@
     var TOPIC          = "spandan/inauguration/ctrl";
     var SITE_URL       = "https://lava-mh.com";
     var DESKTOP_W      = 1920;
-    var CELEBRATE_TIME = 2000;
+    var CELEBRATE_TIME = 6000;
 
     /* ── Elements ──────────────────────────────────────────────────── */
     var video     = document.getElementById("video");
@@ -103,9 +120,15 @@
     var bgMusic   = document.getElementById("bgMusic");
     var ctx       = canvas.getContext("2d");
 
+    // Set initial source immediately for streaming fallback
     video.src = VIDEO_URL;
 
-    function status(t, ok) { bar.textContent = t; bar.className = ok ? "ok" : ""; }
+    function status(t, ok) { 
+      bar.textContent = t; 
+      bar.className = ok ? "ok" : ""; 
+      bar.classList.remove("gone"); 
+      console.log("Status:", t);
+    }
     function hideBar() { bar.classList.add("gone"); }
 
     /* ── Audio Fade Logic ─────────────────────────────────────────── */
@@ -195,6 +218,8 @@
     function startCelebration() {
       resizeCanvas();
       canvas.style.display = "block";
+      canvas.style.opacity = "1";
+      canvas.classList.remove("fadeout");
       var fTimer = setInterval(function() {
         burst(canvas.width * (0.1 + Math.random() * 0.8), canvas.height * (0.1 + Math.random() * 0.4));
       }, 600);
@@ -206,8 +231,10 @@
         clearInterval(cTimer);
         canvas.classList.add("fadeout");
         
-        // Music fades out smoothly exactly when the site becomes interactive
-        fadeOutMusic(2000); 
+        // Music lasts 2 sec more after sparkling ends
+        setTimeout(function() {
+          fadeOutMusic(2000); 
+        }, 2000);
 
         siteFrame.setAttribute("scrolling", "yes");
         siteFrame.classList.add("interact");
@@ -216,17 +243,26 @@
         
         setTimeout(function() {
           canvas.style.display = "none";
-          cancelAnimationFrame(animRAF);
+          if (animRAF) cancelAnimationFrame(animRAF);
         }, 1500);
       }, CELEBRATE_TIME);
     }
 
     /* ── Flow Logic ────────────────────────────────────────────────── */
-    async function playVideo() {
+    function playVideo() {
+      siteWrap.classList.remove("active", "visible", "interact");
+      siteFrame.classList.remove("interact");
+      siteFrame.src = ""; 
+      document.body.style.cursor = "none";
+      
       img.classList.add("hidden");
       video.classList.remove("hidden");
       video.currentTime = 0;
-      try { await video.play(); } catch(e) { status("Tap screen once to allow audio, then retry"); }
+      video.play().then(function() {
+        hideBar();
+      }).catch(function(e) { 
+        status("Tap screen to allow video play."); 
+      });
     }
 
     video.addEventListener("ended", function () {
@@ -237,9 +273,26 @@
       setTimeout(function() {
         siteWrap.classList.add("visible");
         startCelebration();
-        hideBar();
-      }, 500);
+      }, 50);
     });
+
+    /* ── Preload Logic ─────────────────────────────────────────────── */
+    function preloadVideo() {
+      status("Optimizing experience...");
+      fetch(VIDEO_URL).then(function(response) {
+        if (!response.ok) throw new Error();
+        return response.blob();
+      }).then(function(blob) {
+        var url = URL.createObjectURL(blob);
+        video.src = url;
+        status("System Ready.", true);
+        setTimeout(hideBar, 3000);
+      }).catch(function(e) {
+        video.src = VIDEO_URL;
+        status("System Ready.", true);
+        setTimeout(hideBar, 2000);
+      });
+    }
 
     /* ── Arming Logic ──────────────────────────────────────────────── */
     var armed = false;
@@ -249,19 +302,16 @@
       overlay.classList.add("hidden");
       try { goFS(); } catch(e) {}
       
-      // Prepare music volume but don't play yet
       bgMusic.volume = 1.0;
+      bgMusic.load(); 
 
-      // Warm up video
       video.muted = true;
       video.play().then(function() {
         video.pause(); video.currentTime = 0; video.muted = false;
-        status("Armed. Waiting for remote.", true);
-        setTimeout(hideBar, 3000);
+        preloadVideo(); 
       }).catch(function() {
         video.muted = false;
-        status("Armed. Waiting for remote.", true);
-        setTimeout(hideBar, 3000);
+        preloadVideo();
       });
     }
     overlay.addEventListener("click", arm);
@@ -276,22 +326,32 @@
     }
 
     /* ── MQTT ──────────────────────────────────────────────────────── */
-    var client = mqtt.connect(BROKER, { clean: true, reconnectPeriod: 2000, clientId: "player_" + Math.random().toString(16).slice(2, 8) });
-    client.on("connect", function () {
-      client.subscribe(TOPIC, function (err) { if (!err) { status("Ready. Waiting for remote.", true); } });
-    });
-    client.on("message", function (t, p) {
-      try { 
-        var d = JSON.parse(p.toString()); 
-        if (d.cmd === "play") { 
-          goFS(); 
-          playVideo();
-          // Start music on launch command
-          bgMusic.play().catch(function(e){ console.log("Audio play failed:", e); });
-        } 
-      } catch(e) {}
-    });
-    client.on("reconnect", function () { status("Reconnecting..."); });
+    if (typeof mqtt !== "undefined") {
+      var client = mqtt.connect(BROKER, { clean: true, reconnectPeriod: 2000, clientId: "player_" + Math.random().toString(16).slice(2, 8) });
+      client.on("connect", function () {
+        client.subscribe(TOPIC, function (err) { 
+          if (!err && armed) status("System Ready.", true);
+        });
+      });
+      client.on("message", function (t, p) {
+        try { 
+          var d = JSON.parse(p.toString()); 
+          if (d.cmd === "play") { 
+            if (animRAF) cancelAnimationFrame(animRAF);
+            particles = [];
+            goFS(); 
+            playVideo();
+            bgMusic.currentTime = 0;
+            bgMusic.volume = 1.0;
+            bgMusic.play().catch(function(e){ console.log("Audio play failed:", e); });
+          } 
+        } catch(e) {}
+      });
+      client.on("reconnect", function () { status("Reconnecting..."); });
+    } else {
+      console.error("MQTT library not loaded");
+      status("Library Error. Check Internet.");
+    }
   </script>
 </body>
 </html>

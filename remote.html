@@ -108,18 +108,46 @@
       popup.classList.add("show");
     }
 
-    var client = mqtt.connect(BROKER, { clean: true, reconnectPeriod: 2000, clientId: "remote_" + Math.random().toString(16).slice(2, 10) });
-    client.on("connect", function () { setStatus("Connected. Ready!", "ok"); });
-    client.on("reconnect", function () { setStatus("Reconnecting...", "warn"); });
-    client.on("error", function () { setStatus("Connection error", "warn"); });
+    var client = mqtt.connect(BROKER, { clean: true, reconnectPeriod: 1000, clientId: "remote_" + Math.random().toString(16).slice(2, 10) });
+    
+    client.on("connect", function () { 
+      setStatus("Connected. System Ready!", "ok"); 
+      playBtn.disabled = false;
+      playBtn.style.opacity = "1";
+    });
+    
+    client.on("reconnect", function () { 
+      setStatus("Connecting to system...", "warn"); 
+      playBtn.disabled = true;
+      playBtn.style.opacity = "0.6";
+    });
+    
+    client.on("error", function () { 
+      setStatus("Offline. Check connection.", "warn"); 
+    });
 
     function send(cmd) {
-      if (!client || !client.connected) { setStatus("Not connected yet", "warn"); return; }
-      setStatus("Launching...", "ok");
+      if (!client || !client.connected) { 
+        setStatus("Waiting for connection...", "warn"); 
+        return; 
+      }
+      
+      // Haptic feedback for no-delay feel
+      if (window.navigator && window.navigator.vibrate) {
+        window.navigator.vibrate(50);
+      }
+
+      setStatus("Signal sent!", "ok");
       client.publish(TOPIC, JSON.stringify({ cmd: cmd, at: Date.now() }), { qos: 1 }, function (err) { 
         if (!err && cmd === "play") {
-          setStatus("Launched successfully!", "ok");
           showSuccess();
+          setTimeout(function() { 
+            if (statusEl.textContent === "Signal sent!") {
+              setStatus("Connected. System Ready!", "ok"); 
+            }
+          }, 2000);
+        } else if (err) {
+          setStatus("Failed to send signal.", "warn");
         }
       });
     }
@@ -129,3 +157,4 @@
   </script>
 </body>
 </html>
+
