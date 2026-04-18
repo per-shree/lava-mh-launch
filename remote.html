@@ -1,4 +1,4 @@
-﻿<!doctype html>
+<!doctype html>
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
@@ -7,12 +7,12 @@
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
     html, body { height: 100%; font-family: "Segoe UI", system-ui, sans-serif; color: #e8ecf2; background: linear-gradient(170deg, #020408 0%, #060a14 40%, #0a0e1a 70%, #030610 100%); }
-    body { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 0; padding: 24px; -webkit-user-select: none; user-select: none; position: relative; min-height: 100%; }
+    body { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 0; padding: 24px; -webkit-user-select: none; user-select: none; position: relative; min-height: 100%; overflow: hidden; }
 
     .badge { display: inline-flex; align-items: center; gap: 8px; border: 1px solid rgba(100,160,220,.3); border-radius: 999px; padding: 8px 20px; font: 600 12px/1 sans-serif; letter-spacing: 3px; text-transform: uppercase; color: #7eb8e0; margin-bottom: 22px; margin-top: -40px; }
     .badge::before { content: "\1F4E1"; font-size: 14px; }
 
-    .title { text-align: center; margin-bottom: 8px; font-size: 32px; font-weight: 800; background: linear-gradient(135deg, #ffffff 0%, #a8d8ff 40%, #4da8ff 65%, #2b7de9 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; }
+    .title { text-align: center; margin-bottom: 8px; font-size: 32px; font-weight: 800; line-height: 1.1; background: linear-gradient(135deg, #ffffff 0%, #a8d8ff 40%, #4da8ff 65%, #2b7de9 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; padding: 0 10px; }
 
     .subtitle { font-size: 14px; color: #6a7a90; text-align: center; line-height: 1.5; margin-bottom: 52px; }
 
@@ -36,11 +36,32 @@
     #status.ok { color: #6fd6a4; }
     #status.warn { color: #ff7b72; }
 
+    #successPopup {
+      position: fixed;
+      top: 50%; left: 50%;
+      transform: translate(-50%, -50%) scale(0.7);
+      width: 80%; max-width: 320px;
+      background: rgba(20, 30, 60, 0.95);
+      border: 1px solid rgba(100, 200, 255, 0.4);
+      border-radius: 24px;
+      padding: 32px 24px;
+      text-align: center;
+      z-index: 100;
+      opacity: 0;
+      visibility: hidden;
+      transition: all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+      box-shadow: 0 20px 60px rgba(0, 0, 0, 0.8), 0 0 40px rgba(0, 180, 255, 0.2);
+    }
+    #successPopup.show { opacity: 1; visibility: visible; transform: translate(-50%, -50%) scale(1); }
+    .check-icon { font-size: 48px; display: block; margin-bottom: 16px; }
+    .popup-title { font-size: 20px; font-weight: 700; color: #fff; margin-bottom: 8px; }
+    .popup-msg { font-size: 14px; color: #a8d8ff; line-height: 1.4; }
+
     .footer { position: absolute; bottom: 24px; left: 0; right: 0; text-align: center; font: 600 11px/1 sans-serif; letter-spacing: 2px; text-transform: uppercase; color: #2e3d52; }
 
     @media (max-width: 400px) {
       body { padding: 16px; }
-      .title { font-size: 24px; }
+      .title { font-size: 26px; }
       .subtitle { font-size: 12px; margin-bottom: 24px; }
       .badge { padding: 6px 14px; font-size: 10px; margin-bottom: 14px; }
       #playBtn { font-size: 12px; letter-spacing: 3px; }
@@ -49,31 +70,62 @@
 </head>
 <body>
   <div class="badge">Remote Control</div>
-  <div class="title">Amrut Spandan 2K26</div>
-  <div class="subtitle">Tap the button below to inaugurate the event<br>on the big screen</div>
+  <div class="title">LAVA-MH<br>Website Launch</div>
+  <div class="subtitle">Tap the button below to launch the website<br>on the big screen</div>
   <div class="btn-wrap">
     <div class="ring ring-2"></div>
     <div class="ring ring-1"></div>
-    <button id="playBtn">Inaugurate</button>
+    <button id="playBtn">Launch</button>
   </div>
   <div id="status">Waiting for your tap...</div>
-  <div class="footer">Made with ❤️ by Team Amrut Spandan</div>
+  
+  <div id="successPopup">
+    <span class="check-icon">🚀</span>
+    <div class="popup-title">Successfully Launched!</div>
+    <div class="popup-msg">The inauguration video has started on the display.</div>
+    <div id="popupBtn" style="margin-top:20px; padding:10px 20px; background:rgba(255,255,255,0.1); border:1px solid rgba(255,255,255,0.2); border-radius:12px; color:#fff; font-size:12px; font-weight:600; display:inline-block; cursor:pointer;">DISMISS</div>
+  </div>
+
+  <div class="footer">Made with ❤️ by Qwicit</div>
+
   <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
   <script>
     var BROKER = "wss://broker.hivemq.com:8884/mqtt";
     var TOPIC = "spandan/inauguration/ctrl";
     var playBtn = document.getElementById("playBtn");
     var statusEl = document.getElementById("status");
-    function setStatus(t, cls) { statusEl.textContent = t; statusEl.className = cls || ""; }
+    var popup = document.getElementById("successPopup");
+
+    function setStatus(t, cls) { 
+      statusEl.textContent = t; 
+      statusEl.className = cls || ""; 
+    }
+
+    function showSuccess() {
+      if (window.navigator && window.navigator.vibrate) {
+        window.navigator.vibrate([100, 50, 100]);
+      }
+      popup.classList.add("show");
+    }
+
     var client = mqtt.connect(BROKER, { clean: true, reconnectPeriod: 2000, clientId: "remote_" + Math.random().toString(16).slice(2, 10) });
     client.on("connect", function () { setStatus("Connected. Ready!", "ok"); });
     client.on("reconnect", function () { setStatus("Reconnecting...", "warn"); });
     client.on("error", function () { setStatus("Connection error", "warn"); });
+
     function send(cmd) {
       if (!client || !client.connected) { setStatus("Not connected yet", "warn"); return; }
-      client.publish(TOPIC, JSON.stringify({ cmd: cmd, at: Date.now() }), { qos: 1 }, function () { setStatus("Sent: " + cmd, "ok"); });
+      setStatus("Launching...", "ok");
+      client.publish(TOPIC, JSON.stringify({ cmd: cmd, at: Date.now() }), { qos: 1 }, function (err) { 
+        if (!err && cmd === "play") {
+          setStatus("Launched successfully!", "ok");
+          showSuccess();
+        }
+      });
     }
+
     playBtn.addEventListener("click", function () { send("play"); });
+    popup.addEventListener("click", function() { popup.classList.remove("show"); });
   </script>
 </body>
 </html>

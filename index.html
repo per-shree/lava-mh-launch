@@ -1,4 +1,4 @@
-﻿<!doctype html>
+<!doctype html>
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
@@ -10,12 +10,58 @@
     #wrapper { width: 100vw; height: 100vh; display: grid; place-items: center; background: #000; }
     video, img { width: 100vw; height: 100vh; object-fit: cover; position: absolute; top: 0; left: 0; }
     .hidden { display: none; }
+
+    /* Website iframe — shown after video */
+    #site-wrap {
+      display: none;
+      position: fixed;
+      inset: 0;
+      width: 100vw;
+      height: 100vh;
+      overflow: hidden; 
+      z-index: 30;
+      opacity: 0;
+      transition: opacity 1s ease;
+      background: #000;
+    }
+    #site-wrap.active { display: block; }
+    #site-wrap.visible { opacity: 1; }
+    #site-wrap.interact { cursor: auto; }
+    
+    #site-frame {
+      display: block;
+      width: 1920px;
+      height: 1080px;
+      border: none;
+      transform-origin: top left;
+      pointer-events: none;
+    }
+    #site-frame.interact {
+      pointer-events: auto;
+    }
+
+    /* Status bar */
     #bar { position: fixed; bottom: 0; left: 0; right: 0; background: rgba(0,0,0,0.75); color: #9ab; font: 13px/1.6 sans-serif; text-align: center; padding: 4px 12px; z-index: 10; transition: opacity .6s; }
     #bar.ok { color: #6fd6a4; }
     #bar.gone { opacity: 0; pointer-events: none; }
-    #overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.85); display: grid; place-items: center; z-index: 20; cursor: pointer; }
-    #overlay span { color: #fff; font: 600 32px sans-serif; text-align: center; padding: 16px; }
+
+    /* Click-to-arm overlay */
+    #overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.85); display: grid; place-items: center; z-index: 50; cursor: pointer; }
+    #overlay span { color: #fff; font: 600 32px sans-serif; text-align: center; padding: 16px; pointer-events: none; }
     #overlay.hidden { display: none; }
+
+    /* Celebration canvas */
+    #celebrate {
+      display: none;
+      position: fixed;
+      inset: 0;
+      z-index: 40;
+      pointer-events: none;
+      transition: opacity 1.5s ease;
+    }
+    #celebrate.fadeout {
+      opacity: 0;
+    }
   </style>
 </head>
 <body>
@@ -23,62 +69,220 @@
     <video id="video" playsinline preload="auto"></video>
     <img id="img" class="hidden" src="2.jpg.jpeg" alt="" />
   </div>
+
+  <!-- Background Music Loop -->
+  <audio id="bgMusic" src="NASTY! (Sped Up).mp3" preload="auto" loop></audio>
+
+  <div id="site-wrap">
+    <iframe id="site-frame" src="" scrolling="no" allowfullscreen></iframe>
+  </div>
+
+  <canvas id="celebrate"></canvas>
+
   <div id="overlay"><span>Click anywhere to start</span></div>
   <div id="bar">Connecting...</div>
+
   <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
   <script>
-    var VIDEO_URL = "https://res.cloudinary.com/dzazecta2/video/upload/v1775117076/Spandan_m5j1ce.mp4";
-    var BROKER = "wss://broker.hivemq.com:8884/mqtt";
-    var TOPIC = "spandan/inauguration/ctrl";
-    var video = document.getElementById("video");
-    var img = document.getElementById("img");
-    var bar = document.getElementById("bar");
+    /* ── Config ────────────────────────────────────────────────────── */
+    var VIDEO_URL      = "https://res.cloudinary.com/dzazecta2/video/upload/v1776484458/Video_Project_4_udqsvs.mp4";
+    var BROKER         = "wss://broker.hivemq.com:8884/mqtt";
+    var TOPIC          = "spandan/inauguration/ctrl";
+    var SITE_URL       = "https://lava-mh.com";
+    var DESKTOP_W      = 1920;
+    var CELEBRATE_TIME = 2000;
+
+    /* ── Elements ──────────────────────────────────────────────────── */
+    var video     = document.getElementById("video");
+    var img       = document.getElementById("img");
+    var bar       = document.getElementById("bar");
+    var overlay   = document.getElementById("overlay");
+    var canvas    = document.getElementById("celebrate");
+    var siteWrap  = document.getElementById("site-wrap");
+    var siteFrame = document.getElementById("site-frame");
+    var bgMusic   = document.getElementById("bgMusic");
+    var ctx       = canvas.getContext("2d");
+
     video.src = VIDEO_URL;
+
     function status(t, ok) { bar.textContent = t; bar.className = ok ? "ok" : ""; }
     function hideBar() { bar.classList.add("gone"); }
+
+    /* ── Audio Fade Logic ─────────────────────────────────────────── */
+    function fadeOutMusic(durationMs) {
+      if (!bgMusic) return;
+      var startVol = bgMusic.volume;
+      if (startVol === 0) return;
+      var interval = 50; 
+      var step = startVol / (durationMs / interval);
+      var fade = setInterval(function() {
+        if (bgMusic.volume > step) {
+          bgMusic.volume -= step;
+        } else {
+          bgMusic.volume = 0;
+          bgMusic.pause();
+          clearInterval(fade);
+        }
+      }, interval);
+    }
+
+    /* ── Desktop Scaling Logic ─────────────────────────────────────── */
+    function applyDesktopScale() {
+      var scale = window.innerWidth / DESKTOP_W;
+      siteFrame.style.transform = 'scale(' + scale + ')';
+      siteFrame.style.height = (window.innerHeight / scale) + "px";
+    }
+    window.addEventListener("resize", applyDesktopScale);
+
+    /* ── Celebration Logic ─────────────────────────────────────────── */
+    var particles = [];
+    var animRAF   = null;
+    var COLORS = ["#ff0080","#ff6b00","#ffd700","#00e676","#00b0ff","#d500f9","#ffffff","#ff4444"];
+
+    function resizeCanvas() {
+      canvas.width = window.innerWidth;
+      canvas.height = window.innerHeight;
+    }
+    window.addEventListener("resize", resizeCanvas);
+
+    function burst(x, y) {
+      var count = 100 + Math.random() * 50 | 0;
+      for (var i = 0; i < count; i++) {
+        var angle = (Math.PI * 2 / count) * i + Math.random() * 0.5;
+        var speed = 4 + Math.random() * 10;
+        particles.push({
+          x: x, y: y, vx: Math.cos(angle) * speed, vy: Math.sin(angle) * speed,
+          alpha: 1, size: 2 + Math.random() * 4, color: COLORS[Math.random() * COLORS.length | 0],
+          type: "spark", decay: 0.01 + Math.random() * 0.01
+        });
+      }
+    }
+
+    function spawnConfetti() {
+      for (var i = 0; i < 8; i++) {
+        particles.push({
+          x: Math.random() * canvas.width, y: -20, vx: (Math.random() - 0.5) * 4, vy: 3 + Math.random() * 5,
+          alpha: 1, size: 8 + Math.random() * 12, color: COLORS[Math.random() * COLORS.length | 0],
+          type: "confetti", rot: Math.random() * Math.PI * 2, rotV: (Math.random() - 0.5) * 0.25, decay: 0.003
+        });
+      }
+    }
+
+    function celebrateLoop() {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      for (var i = particles.length - 1; i >= 0; i--) {
+        var p = particles[i];
+        p.x += p.vx; p.y += p.vy; p.alpha -= p.decay;
+        if (p.type === "spark") {
+          p.vy += 0.2;
+          ctx.globalAlpha = Math.max(0, p.alpha);
+          ctx.fillStyle = p.color;
+          ctx.beginPath(); ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2); ctx.fill();
+        } else {
+          p.rot += p.rotV; p.vy += 0.02;
+          ctx.globalAlpha = Math.max(0, p.alpha);
+          ctx.save();
+          ctx.translate(p.x, p.y); ctx.rotate(p.rot);
+          ctx.fillStyle = p.color;
+          ctx.fillRect(-p.size / 2, -p.size / 4, p.size, p.size / 2);
+          ctx.restore();
+        }
+        if (p.alpha <= 0 || p.y > canvas.height + 50) particles.splice(i, 1);
+      }
+      animRAF = requestAnimationFrame(celebrateLoop);
+    }
+
+    function startCelebration() {
+      resizeCanvas();
+      canvas.style.display = "block";
+      var fTimer = setInterval(function() {
+        burst(canvas.width * (0.1 + Math.random() * 0.8), canvas.height * (0.1 + Math.random() * 0.4));
+      }, 600);
+      var cTimer = setInterval(spawnConfetti, 100);
+      celebrateLoop();
+
+      setTimeout(function() {
+        clearInterval(fTimer);
+        clearInterval(cTimer);
+        canvas.classList.add("fadeout");
+        
+        // Music fades out smoothly exactly when the site becomes interactive
+        fadeOutMusic(2000); 
+
+        siteFrame.setAttribute("scrolling", "yes");
+        siteFrame.classList.add("interact");
+        siteWrap.classList.add("interact");
+        document.body.style.cursor = "auto";
+        
+        setTimeout(function() {
+          canvas.style.display = "none";
+          cancelAnimationFrame(animRAF);
+        }, 1500);
+      }, CELEBRATE_TIME);
+    }
+
+    /* ── Flow Logic ────────────────────────────────────────────────── */
     async function playVideo() {
       img.classList.add("hidden");
       video.classList.remove("hidden");
       video.currentTime = 0;
-      try { await video.play(); } catch(e) { status("Tap screen once to allow audio, then retry from remote"); }
+      try { await video.play(); } catch(e) { status("Tap screen once to allow audio, then retry"); }
     }
-    var played = false;
+
     video.addEventListener("ended", function () {
-      played = true;
       video.classList.add("hidden");
-      img.classList.remove("hidden");
-      hideBar();
+      applyDesktopScale();
+      siteFrame.src = SITE_URL;
+      siteWrap.classList.add("active");
+      setTimeout(function() {
+        siteWrap.classList.add("visible");
+        startCelebration();
+        hideBar();
+      }, 500);
     });
-    function stopAll() {
-      if (played) return;
-      video.pause(); video.currentTime = 0;
-      video.classList.remove("hidden");
-      img.classList.add("hidden");
-    }
-    var overlay = document.getElementById("overlay");
-    document.addEventListener("click", function arm() {
-      document.removeEventListener("click", arm);
+
+    /* ── Arming Logic ──────────────────────────────────────────────── */
+    var armed = false;
+    function arm() {
+      if (armed) return;
+      armed = true;
       overlay.classList.add("hidden");
-      goFS();
+      try { goFS(); } catch(e) {}
+      
+      // Warm up and START music immediately on first click
+      bgMusic.volume = 1.0;
+      bgMusic.play().catch(function(e){ console.log("Audio play failed:", e); });
+
+      // Warm up video
       video.muted = true;
-      video.play().then(function() { video.pause(); video.currentTime = 0; video.muted = false; status("Armed. Waiting for remote.", true); setTimeout(hideBar, 3000); }).catch(function(){});
-    });
+      video.play().then(function() {
+        video.pause(); video.currentTime = 0; video.muted = false;
+        status("Armed. Waiting for remote.", true);
+        setTimeout(hideBar, 3000);
+      }).catch(function() {
+        video.muted = false;
+        status("Armed. Waiting for remote.", true);
+        setTimeout(hideBar, 3000);
+      });
+    }
+    overlay.addEventListener("click", arm);
+    document.addEventListener("click", arm);
+
     function goFS() {
       var el = document.documentElement;
-      if (el.requestFullscreen) el.requestFullscreen();
-      else if (el.webkitRequestFullscreen) el.webkitRequestFullscreen();
+      try {
+        if (el.requestFullscreen) el.requestFullscreen().catch(function(){});
+        else if (el.webkitRequestFullscreen) el.webkitRequestFullscreen();
+      } catch(e) {}
     }
-    document.addEventListener("dblclick", goFS);
-    document.addEventListener("fullscreenchange", function () { if (!document.fullscreenElement) goFS(); });
-    var client = mqtt.connect(BROKER, { clean: true, reconnectPeriod: 2000, clientId: "player_" + Math.random().toString(16).slice(2, 10) });
+
+    /* ── MQTT ──────────────────────────────────────────────────────── */
+    var client = mqtt.connect(BROKER, { clean: true, reconnectPeriod: 2000, clientId: "player_" + Math.random().toString(16).slice(2, 8) });
     client.on("connect", function () {
-      client.subscribe(TOPIC, function (err) { if (!err) { status("Ready. Waiting for remote.", true); setTimeout(hideBar, 3000); } });
+      client.subscribe(TOPIC, function (err) { if (!err) { status("Ready. Waiting for remote.", true); } });
     });
     client.on("message", function (t, p) {
-      if (t !== TOPIC) return;
-      try { var d = JSON.parse(p.toString()); } catch(e) { return; }
-      if (d.cmd === "play") { goFS(); playVideo(); }
-      if (d.cmd === "stop") { stopAll(); status("Stopped"); }
+      try { var d = JSON.parse(p.toString()); if (d.cmd === "play") { goFS(); playVideo(); } } catch(e) {}
     });
     client.on("reconnect", function () { status("Reconnecting..."); });
   </script>
