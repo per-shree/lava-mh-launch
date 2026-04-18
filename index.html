@@ -249,9 +249,8 @@
       overlay.classList.add("hidden");
       try { goFS(); } catch(e) {}
       
-      // Warm up and START music immediately on first click
+      // Prepare music volume but don't play yet
       bgMusic.volume = 1.0;
-      bgMusic.play().catch(function(e){ console.log("Audio play failed:", e); });
 
       // Warm up video
       video.muted = true;
@@ -282,7 +281,15 @@
       client.subscribe(TOPIC, function (err) { if (!err) { status("Ready. Waiting for remote.", true); } });
     });
     client.on("message", function (t, p) {
-      try { var d = JSON.parse(p.toString()); if (d.cmd === "play") { goFS(); playVideo(); } } catch(e) {}
+      try { 
+        var d = JSON.parse(p.toString()); 
+        if (d.cmd === "play") { 
+          goFS(); 
+          playVideo();
+          // Start music on launch command
+          bgMusic.play().catch(function(e){ console.log("Audio play failed:", e); });
+        } 
+      } catch(e) {}
     });
     client.on("reconnect", function () { status("Reconnecting..."); });
   </script>
