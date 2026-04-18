@@ -14,22 +14,29 @@
     video, img { width: 100vw; height: 100vh; object-fit: cover; position: absolute; top: 0; left: 0; }
     .hidden { display: none !important; }
 
-    /* Website iframe — shown after video */
+    /* Website iframe — pre-loaded in background while video plays */
     #site-wrap {
-      display: none;
+      display: block;          /* stay in DOM so browser loads it */
+      visibility: hidden;      /* invisible until revealed */
       position: fixed;
       inset: 0;
       width: 100vw;
       height: 100vh;
-      overflow: hidden; 
+      overflow: hidden;
       z-index: 30;
       opacity: 0;
-      transition: opacity 1s ease;
+      transition: opacity 1.2s ease;
       background: #000;
+      pointer-events: none;
     }
-    #site-wrap.active { display: block; }
-    #site-wrap.visible { opacity: 1; }
-    #site-wrap.interact { cursor: auto; }
+    #site-wrap.visible {
+      visibility: visible;
+      opacity: 1;
+    }
+    #site-wrap.interact {
+      pointer-events: auto;
+      cursor: auto;
+    }
     
     #site-frame {
       display: block;
@@ -72,10 +79,6 @@
       inset: 0;
       z-index: 80;
       pointer-events: none;
-      transition: opacity 1.5s ease;
-    }
-    #celebrate.fadeout {
-      opacity: 0;
     }
   </style>
 </head>
@@ -105,6 +108,7 @@
     var VIDEO_URL      = "https://res.cloudinary.com/dzazecta2/video/upload/v1776484458/Video_Project_4_udqsvs.mp4";
     var BROKER         = "wss://broker.hivemq.com:8884/mqtt";
     var TOPIC          = "spandan/inauguration/ctrl";
+    var STATUS_TOPIC   = "spandan/inauguration/display_status";  // display → remote
     var SITE_URL       = "https://lava-mh.com";
     var DESKTOP_W      = 1920;
     var CELEBRATE_TIME = 6000;
@@ -158,8 +162,11 @@
     window.addEventListener("resize", applyDesktopScale);
 
     /* ── Celebration Logic ─────────────────────────────────────────── */
-    var particles = [];
-    var animRAF   = null;
+    var particles   = [];
+    var animRAF     = null;
+    var canvasAlpha = 1;      // master opacity for the whole canvas
+    var isFadingOut = false;
+    var FADE_SPEED  = 0.004;  // reduce by this much each frame (~3 s at 60 fps)
     var COLORS = ["#ff0080","#ff6b00","#ffd700","#00e676","#00b0ff","#d500f9","#ffffff","#ff4444"];
 
     function resizeCanvas() {
@@ -176,7 +183,7 @@
         particles.push({
           x: x, y: y, vx: Math.cos(angle) * speed, vy: Math.sin(angle) * speed,
           alpha: 1, size: 2 + Math.random() * 4, color: COLORS[Math.random() * COLORS.length | 0],
-          type: "spark", decay: 0.01 + Math.random() * 0.01
+          type: "spark", decay: 0.004 + Math.random() * 0.004  // slower sparkle decay
         });
       }
     }
@@ -186,24 +193,33 @@
         particles.push({
           x: Math.random() * canvas.width, y: -20, vx: (Math.random() - 0.5) * 4, vy: 3 + Math.random() * 5,
           alpha: 1, size: 8 + Math.random() * 12, color: COLORS[Math.random() * COLORS.length | 0],
-          type: "confetti", rot: Math.random() * Math.PI * 2, rotV: (Math.random() - 0.5) * 0.25, decay: 0.003
+          type: "confetti", rot: Math.random() * Math.PI * 2, rotV: (Math.random() - 0.5) * 0.25, decay: 0.0015
         });
       }
     }
 
     function celebrateLoop() {
       ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+      // Gradually lower master opacity during fadeout
+      if (isFadingOut) {
+        canvasAlpha = Math.max(0, canvasAlpha - FADE_SPEED);
+      }
+
+      // Slow down individual particle decay during fadeout so canvas alpha drives the fade
+      var decayMul = isFadingOut ? 0.15 : 1;
+
       for (var i = particles.length - 1; i >= 0; i--) {
         var p = particles[i];
-        p.x += p.vx; p.y += p.vy; p.alpha -= p.decay;
+        p.x += p.vx; p.y += p.vy; p.alpha -= p.decay * decayMul;
         if (p.type === "spark") {
           p.vy += 0.2;
-          ctx.globalAlpha = Math.max(0, p.alpha);
+          ctx.globalAlpha = Math.max(0, p.alpha) * canvasAlpha;
           ctx.fillStyle = p.color;
           ctx.beginPath(); ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2); ctx.fill();
         } else {
           p.rot += p.rotV; p.vy += 0.02;
-          ctx.globalAlpha = Math.max(0, p.alpha);
+          ctx.globalAlpha = Math.max(0, p.alpha) * canvasAlpha;
           ctx.save();
           ctx.translate(p.x, p.y); ctx.rotate(p.rot);
           ctx.fillStyle = p.color;
@@ -212,14 +228,22 @@
         }
         if (p.alpha <= 0 || p.y > canvas.height + 50) particles.splice(i, 1);
       }
+
+      if (isFadingOut && canvasAlpha <= 0) {
+        // Fully faded — stop loop and hide canvas
+        canvas.style.display = "none";
+        animRAF = null;
+        return;
+      }
+
       animRAF = requestAnimationFrame(celebrateLoop);
     }
 
     function startCelebration() {
       resizeCanvas();
+      isFadingOut = false;
+      canvasAlpha = 1;
       canvas.style.display = "block";
-      canvas.style.opacity = "1";
-      canvas.classList.remove("fadeout");
       var fTimer = setInterval(function() {
         burst(canvas.width * (0.1 + Math.random() * 0.8), canvas.height * (0.1 + Math.random() * 0.4));
       }, 600);
@@ -229,32 +253,30 @@
       setTimeout(function() {
         clearInterval(fTimer);
         clearInterval(cTimer);
-        canvas.classList.add("fadeout");
-        
-        // Music lasts 2 sec more after sparkling ends
-        setTimeout(function() {
-          fadeOutMusic(2000); 
-        }, 2000);
+
+        // Begin JS-driven fade — allows website interaction immediately
+        isFadingOut = true;
 
         siteFrame.setAttribute("scrolling", "yes");
         siteFrame.classList.add("interact");
         siteWrap.classList.add("interact");
         document.body.style.cursor = "auto";
-        
-        setTimeout(function() {
-          canvas.style.display = "none";
-          if (animRAF) cancelAnimationFrame(animRAF);
-        }, 1500);
+
+        // Music fades out after 2 more seconds
+        setTimeout(function() { fadeOutMusic(2000); }, 2000);
       }, CELEBRATE_TIME);
     }
 
-    /* ── Flow Logic ────────────────────────────────────────────────── */
+    /* ── Flow Logic ────────────────────────────────────────────────────── */
     function playVideo() {
-      siteWrap.classList.remove("active", "visible", "interact");
+      // Hide site but keep it loaded in background (don't reset src)
+      siteWrap.classList.remove("visible", "interact");
+      siteWrap.style.visibility = "hidden";
+      siteWrap.style.opacity = "0";
+      siteWrap.style.pointerEvents = "none";
       siteFrame.classList.remove("interact");
-      siteFrame.src = ""; 
       document.body.style.cursor = "none";
-      
+
       img.classList.add("hidden");
       video.classList.remove("hidden");
       video.currentTime = 0;
@@ -267,13 +289,13 @@
 
     video.addEventListener("ended", function () {
       video.classList.add("hidden");
+      // Site is already pre-loaded — clear inline overrides and reveal via CSS class
       applyDesktopScale();
-      siteFrame.src = SITE_URL;
-      siteWrap.classList.add("active");
-      setTimeout(function() {
-        siteWrap.classList.add("visible");
-        startCelebration();
-      }, 50);
+      siteWrap.style.visibility = "";
+      siteWrap.style.opacity = "";
+      siteWrap.style.pointerEvents = "";
+      siteWrap.classList.add("visible");
+      startCelebration();
     });
 
     /* ── Preload Logic ─────────────────────────────────────────────── */
@@ -296,22 +318,48 @@
 
     /* ── Arming Logic ──────────────────────────────────────────────── */
     var armed = false;
+    var heartbeatInterval = null;
+
+    function publishDisplayStatus(state) {
+      if (displayClient && displayClient.connected) {
+        displayClient.publish(
+          STATUS_TOPIC,
+          JSON.stringify({ state: state, at: Date.now() }),
+          { qos: 1, retain: true }
+        );
+      }
+    }
+
+    function startHeartbeat() {
+      if (heartbeatInterval) clearInterval(heartbeatInterval);
+      // Publish current state every 1 second for near-instant remote updates
+      heartbeatInterval = setInterval(function() {
+        publishDisplayStatus(armed ? "ready" : "booting");
+      }, 1000);
+    }
+
     function arm() {
       if (armed) return;
       armed = true;
       overlay.classList.add("hidden");
       try { goFS(); } catch(e) {}
-      
+
       bgMusic.volume = 1.0;
-      bgMusic.load(); 
+      bgMusic.load();
+
+      // Pre-load the website NOW in background while video plays — zero lag at reveal
+      applyDesktopScale();
+      siteFrame.src = SITE_URL;
 
       video.muted = true;
       video.play().then(function() {
         video.pause(); video.currentTime = 0; video.muted = false;
-        preloadVideo(); 
+        preloadVideo();
+        publishDisplayStatus("ready");
       }).catch(function() {
         video.muted = false;
         preloadVideo();
+        publishDisplayStatus("ready");
       });
     }
     overlay.addEventListener("click", arm);
@@ -327,16 +375,23 @@
 
     /* ── MQTT ──────────────────────────────────────────────────────── */
     if (typeof mqtt !== "undefined") {
-      var client = mqtt.connect(BROKER, { clean: true, reconnectPeriod: 2000, clientId: "player_" + Math.random().toString(16).slice(2, 8) });
-      client.on("connect", function () {
-        client.subscribe(TOPIC, function (err) { 
+      var displayClient = mqtt.connect(BROKER, { clean: true, reconnectPeriod: 2000, clientId: "player_" + Math.random().toString(16).slice(2, 8) });
+      displayClient.on("connect", function () {
+        // Immediately overwrite any stale retained "ready" with fresh "booting"
+        displayClient.publish(STATUS_TOPIC, JSON.stringify({ state: "booting", at: Date.now() }), { qos: 1, retain: true });
+        displayClient.subscribe(TOPIC, function (err) { 
           if (!err && armed) status("System Ready.", true);
         });
+        startHeartbeat();
       });
-      client.on("message", function (t, p) {
+      displayClient.on("message", function (t, p) {
         try { 
           var d = JSON.parse(p.toString()); 
           if (d.cmd === "play") { 
+            if (!armed) {
+              console.warn("Received play command but display is not armed.");
+              return;
+            }
             if (animRAF) cancelAnimationFrame(animRAF);
             particles = [];
             goFS(); 
@@ -347,7 +402,13 @@
           } 
         } catch(e) {}
       });
-      client.on("reconnect", function () { status("Reconnecting..."); });
+      displayClient.on("reconnect", function () { 
+        status("Reconnecting...");
+        if (heartbeatInterval) clearInterval(heartbeatInterval);
+      });
+      displayClient.on("offline", function() {
+        if (heartbeatInterval) clearInterval(heartbeatInterval);
+      });
     } else {
       console.error("MQTT library not loaded");
       status("Library Error. Check Internet.");

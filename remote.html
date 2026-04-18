@@ -35,6 +35,21 @@
     #status { font: 400 11px/1 sans-serif; letter-spacing: 1px; text-transform: uppercase; color: #4a6078; text-align: center; min-height: 16px; margin-top: 36px; opacity: .7; }
     #status.ok { color: #6fd6a4; }
     #status.warn { color: #ff7b72; }
+    #status.info { color: #f0c060; }
+
+    #displayStatus {
+      margin-top: 10px;
+      font: 600 11px/1.5 sans-serif;
+      letter-spacing: 1px;
+      text-transform: uppercase;
+      text-align: center;
+      padding: 6px 16px;
+      border-radius: 999px;
+      display: inline-block;
+    }
+    #displayStatus.ready { color: #6fd6a4; background: rgba(111,214,164,0.12); border: 1px solid rgba(111,214,164,0.3); }
+    #displayStatus.notready { color: #ff7b72; background: rgba(255,123,114,0.12); border: 1px solid rgba(255,123,114,0.3); }
+    #displayStatus.unknown { color: #f0c060; background: rgba(240,192,96,0.12); border: 1px solid rgba(240,192,96,0.3); }
 
     #successPopup {
       position: fixed;
@@ -78,58 +93,184 @@
     <button id="playBtn">Launch</button>
   </div>
   <div id="status">Waiting for your tap...</div>
+  <div id="displayStatus" class="unknown">⏳ Checking Display...</div>
   
   <div id="successPopup">
     <span class="check-icon">🚀</span>
     <div class="popup-title">Successfully Launched!</div>
-    <div class="popup-msg">The inauguration video has started on the display.</div>
+    <div class="popup-msg">The inauguration has started on the big screen.</div>
     <div id="popupBtn" style="margin-top:20px; padding:10px 20px; background:rgba(255,255,255,0.1); border:1px solid rgba(255,255,255,0.2); border-radius:12px; color:#fff; font-size:12px; font-weight:600; display:inline-block; cursor:pointer;">DISMISS</div>
   </div>
 
-  <div class="footer">Made with ❤️ by Qwicit</div>
+  <div id="notReadyPopup" style="
+    position: fixed;
+    top: 50%; left: 50%;
+    transform: translate(-50%, -50%) scale(0.7);
+    width: 80%; max-width: 320px;
+    background: rgba(40, 10, 10, 0.97);
+    border: 1px solid rgba(255, 80, 80, 0.5);
+    border-radius: 24px;
+    padding: 32px 24px;
+    text-align: center;
+    z-index: 100;
+    opacity: 0;
+    visibility: hidden;
+    transition: all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+    box-shadow: 0 20px 60px rgba(0,0,0,0.8), 0 0 40px rgba(255,80,80,0.2);
+  ">
+    <span style="font-size:48px; display:block; margin-bottom:16px;">🚫</span>
+    <div style="font-size:20px; font-weight:700; color:#fff; margin-bottom:8px;">Display Not Ready</div>
+    <div style="font-size:14px; color:#ffaaaa; line-height:1.5;">
+      The display screen has not been set up yet.<br>
+      Please click <strong>"Click to Setup Display"</strong> on the big screen first.
+    </div>
+    <div id="notReadyBtn" style="margin-top:20px; padding:10px 20px; background:rgba(255,255,255,0.1); border:1px solid rgba(255,255,255,0.2); border-radius:12px; color:#fff; font-size:12px; font-weight:600; display:inline-block; cursor:pointer;">OK, GOT IT</div>
+  </div>
+
+  <div class="footer">Designed by Shravya Studios</div>
 
   <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
   <script>
-    var BROKER = "wss://broker.hivemq.com:8884/mqtt";
-    var TOPIC = "spandan/inauguration/ctrl";
-    var playBtn = document.getElementById("playBtn");
-    var statusEl = document.getElementById("status");
-    var popup = document.getElementById("successPopup");
+    var BROKER       = "wss://broker.hivemq.com:8884/mqtt";
+    var TOPIC        = "spandan/inauguration/ctrl";
+    var STATUS_TOPIC = "spandan/inauguration/display_status"; // display → remote
+
+    var playBtn       = document.getElementById("playBtn");
+    var statusEl      = document.getElementById("status");
+    var displaySt     = document.getElementById("displayStatus");
+    var popup         = document.getElementById("successPopup");
+    var notReadyPopup = document.getElementById("notReadyPopup");
+
+    // Start with button disabled until we confirm display state
+    playBtn.disabled = true;
+    playBtn.style.opacity = "0.45";
+    playBtn.style.cursor = "not-allowed";
+
+    var displayReady = false; // tracks if display has been armed
 
     function setStatus(t, cls) { 
       statusEl.textContent = t; 
       statusEl.className = cls || ""; 
     }
 
+    function setDisplayStatus(ready) {
+      displayReady = ready;
+      if (ready) {
+        displaySt.textContent = "✅ Display Ready";
+        displaySt.className = "ready";
+      } else {
+        displaySt.textContent = "⚠️ Display Not Ready";
+        displaySt.className = "notready";
+      }
+    }
+
+    function updatePlayBtn() {
+      if (client && client.connected && displayReady) {
+        playBtn.disabled = false;
+        playBtn.style.opacity = "1";
+        playBtn.style.cursor = "pointer";
+        playBtn.style.animation = "breathe 3.5s ease-in-out infinite";
+      } else {
+        playBtn.disabled = true;
+        playBtn.style.opacity = "0.45";
+        playBtn.style.cursor = "not-allowed";
+        playBtn.style.animation = "none";
+      }
+    }
+
     function showSuccess() {
       if (window.navigator && window.navigator.vibrate) {
         window.navigator.vibrate([100, 50, 100]);
       }
-      popup.classList.add("show");
+      popup.style.opacity = "1";
+      popup.style.visibility = "visible";
+      popup.style.transform = "translate(-50%, -50%) scale(1)";
+    }
+
+    function showNotReady() {
+      if (window.navigator && window.navigator.vibrate) {
+        window.navigator.vibrate([200, 100, 200]);
+      }
+      notReadyPopup.style.opacity = "1";
+      notReadyPopup.style.visibility = "visible";
+      notReadyPopup.style.transform = "translate(-50%, -50%) scale(1)";
     }
 
     var client = mqtt.connect(BROKER, { clean: true, reconnectPeriod: 1000, clientId: "remote_" + Math.random().toString(16).slice(2, 10) });
     
-    client.on("connect", function () { 
-      setStatus("Connected. System Ready!", "ok"); 
-      playBtn.disabled = false;
-      playBtn.style.opacity = "1";
+    client.on("connect", function () {
+      // Subscribe to display status topic to know if display is armed
+      client.subscribe(STATUS_TOPIC, function() {});
+      setStatus("Connected — waiting for display...", "info");
+      updatePlayBtn();
     });
     
     client.on("reconnect", function () { 
-      setStatus("Connecting to system...", "warn"); 
-      playBtn.disabled = true;
-      playBtn.style.opacity = "0.6";
+      setStatus("Connecting to system...", "warn");
+      displayReady = false;
+      setDisplayStatus(false);
+      updatePlayBtn();
     });
     
     client.on("error", function () { 
-      setStatus("Offline. Check connection.", "warn"); 
+      setStatus("Offline. Check connection.", "warn");
+      updatePlayBtn();
+    });
+
+    // Watchdog: if no fresh heartbeat arrives within 20s, mark display as gone
+    var lastHeartbeatAt = 0;
+    var watchdogTimer = null;
+
+    function resetWatchdog() {
+      if (watchdogTimer) clearTimeout(watchdogTimer);
+      watchdogTimer = setTimeout(function() {
+        // No heartbeat for 4 seconds — display is gone
+        setDisplayStatus(false);
+        setStatus("Display disconnected. Open display screen first.", "warn");
+        updatePlayBtn();
+      }, 4000);
+    }
+
+    // Max age of a status message to be considered fresh: 3 seconds
+    var MAX_MSG_AGE_MS = 3000;
+
+    client.on("message", function(topic, payload) {
+      try {
+        if (topic === STATUS_TOPIC) {
+          var d = JSON.parse(payload.toString());
+          var age = Date.now() - (d.at || 0);
+
+          // Reject stale retained messages
+          if (age > MAX_MSG_AGE_MS) {
+            setDisplayStatus(false);
+            setStatus("Display not ready. Open the display screen first.", "warn");
+            updatePlayBtn();
+            return;
+          }
+
+          lastHeartbeatAt = Date.now();
+          resetWatchdog();
+
+          if (d.state === "ready") {
+            setDisplayStatus(true);
+            setStatus("Display ready — tap to launch!", "ok");
+          } else {
+            setDisplayStatus(false);
+            setStatus("Display not ready. Setup the big screen first.", "warn");
+          }
+          updatePlayBtn();
+        }
+      } catch(e) {}
     });
 
     function send(cmd) {
       if (!client || !client.connected) { 
         setStatus("Waiting for connection...", "warn"); 
         return; 
+      }
+      if (!displayReady) {
+        showNotReady();
+        return;
       }
       
       // Haptic feedback for no-delay feel
@@ -143,7 +284,7 @@
           showSuccess();
           setTimeout(function() { 
             if (statusEl.textContent === "Signal sent!") {
-              setStatus("Connected. System Ready!", "ok"); 
+              setStatus("Display ready — tap to launch!", "ok"); 
             }
           }, 2000);
         } else if (err) {
@@ -153,7 +294,28 @@
     }
 
     playBtn.addEventListener("click", function () { send("play"); });
-    popup.addEventListener("click", function() { popup.classList.remove("show"); });
+    popup.addEventListener("click", function() { 
+      popup.style.opacity = "0";
+      popup.style.visibility = "hidden";
+      popup.style.transform = "translate(-50%, -50%) scale(0.7)";
+    });
+    document.getElementById("popupBtn").addEventListener("click", function(e) {
+      e.stopPropagation();
+      popup.style.opacity = "0";
+      popup.style.visibility = "hidden";
+      popup.style.transform = "translate(-50%, -50%) scale(0.7)";
+    });
+    document.getElementById("notReadyBtn").addEventListener("click", function(e) {
+      e.stopPropagation();
+      notReadyPopup.style.opacity = "0";
+      notReadyPopup.style.visibility = "hidden";
+      notReadyPopup.style.transform = "translate(-50%, -50%) scale(0.7)";
+    });
+    notReadyPopup.addEventListener("click", function() {
+      notReadyPopup.style.opacity = "0";
+      notReadyPopup.style.visibility = "hidden";
+      notReadyPopup.style.transform = "translate(-50%, -50%) scale(0.7)";
+    });
   </script>
 </body>
 </html>
